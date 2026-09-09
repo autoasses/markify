@@ -30,6 +30,8 @@ from olmocr_grading.pdf_utils import pdf_to_images
 
 from segmentation import segment_document
 
+import db
+
 
 # ============================================================
 # Logging
@@ -223,6 +225,20 @@ def shutdown_ocr_model():
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+# ============================================================
+# MONGODB LIFECYCLE
+# ============================================================
+
+@app.on_event("startup")
+def connect_to_mongo():
+    db.connect()
+
+
+@app.on_event("shutdown")
+def disconnect_from_mongo():
+    db.close()
 
 
 # ============================================================
@@ -783,7 +799,7 @@ async def accept_file(
             questions
         )
 
-        return {
+        response = {
             "success": True,
             "filename": filename,
             "type": "model_answer",
@@ -793,6 +809,14 @@ async def accept_file(
             "questions": questions,
             "ocr": ocr_metadata,
         }
+
+        document_id = db.save_document(
+            response,
+            db.SCANNED_DOCUMENTS_COLLECTION if used_ocr else db.MODEL_ANSWERS_COLLECTION,
+        )
+        response["document_id"] = document_id
+
+        return response
 
     # ========================================================
     # STEP 5: Normal document → Question segmentation
@@ -819,18 +843,24 @@ async def accept_file(
     # FINAL RESPONSE
     # ========================================================
 
-    return JSONResponse(
-        {
-            "success": True,
-            "filename": filename,
-            "type": "raw",
-            "extraction_method": extraction_method,
-            "used_ocr": used_ocr,
-            "markdown": markdown,
-            "segments": segments,
-            "ocr": ocr_metadata,
-        }
+    response = {
+        "success": True,
+        "filename": filename,
+        "type": "raw",
+        "extraction_method": extraction_method,
+        "used_ocr": used_ocr,
+        "markdown": markdown,
+        "segments": segments,
+        "ocr": ocr_metadata,
+    }
+
+    document_id = db.save_document(
+        response,
+        db.SCANNED_DOCUMENTS_COLLECTION if used_ocr else db.MODEL_ANSWERS_COLLECTION,
     )
+    response["document_id"] = document_id
+
+    return JSONResponse(response)
 
 
 # ============================================================
